@@ -1,0 +1,32 @@
+id = "alivop.p3c"
+name = "Java Coding Guidelines"
+version = "0.1.0"
+description = "Checks Java files against the Alibaba Java Development Manual (P3C) while you type, with quick fixes and a project-wide scan; diagnostics appear automatically once installed or enabled. Pure WebAssembly (no PMD/JDK).\nSettings: Settings → Plugins → Java Coding Guidelines (master switch + per-group switches).\nScan: Tools → Java Coding Guidelines: Scan Project.\n中文：边写边按《阿里巴巴 Java 开发手册》（P3C）检查 Java 文件，提供快速修复与全项目扫描；安装或启用后自动出诊断。纯 WebAssembly（无需 PMD/JDK）。\n设置路径：设置 → 插件 → Java Coding Guidelines（总开关 + 按组开关）。\n扫描路径：工具 → Java Coding Guidelines: Scan Project。"
+authors = ["Alivop"]
+license = "Apache-2.0"
+change-notes = "0.1.0 — first release.\n- 38 handbook rules in 9 groups, 6 quick fixes.\n- Per-group switches plus a master switch.\n- Diagnostics appear automatically once installed or enabled, and refresh as you open / edit / save.\n- Settings: Settings → Plugins → Java Coding Guidelines.\n- Scan: Tools → Java Coding Guidelines: Scan Project.\n\n中文：0.1.0 首个版本。\n- 38 条手册规则（9 组）、6 个快速修复。\n- 按组开关 + 总开关。\n- 安装或启用后自动出诊断；打开 / 编辑 / 保存时即时刷新。\n- 设置路径：设置 → 插件 → Java Coding Guidelines。\n- 扫描路径：工具 → Java Coding Guidelines: Scan Project。"
+categories = ["linters"]
+engines.openidea = "^1.6"
+wasm = "dist/plugin.wasm"
+activation = ["on-startup-finished", "on-schedule:60", "on-event:document-changed", "on-event:file-opened", "on-event:file-saved", "on-event:editor-focused", "on-command:*"]
+
+[capabilities]
+required = ["project.read", "events"]
+optional = ["editor.read"]
+
+[[contributes.providers]]
+kinds = ["code-actions"]
+languages = ["java"]
+
+[[contributes.commands]]
+id = "scan"
+title = "Java Coding Guidelines: Scan Project"
+category = "Java Coding Guidelines"
+
+[[contributes.menus]]
+menu = "tools"
+command = "scan"
+
+[contributes.settings]
+title = "Java Coding Guidelines"
+schema = "settings.schema.json"

@@ -1,0 +1,7 @@
+/target
+/dist
+*.oiplugin
+SIGNATURE.json
+*.key
+# SDK is pinned by immutable git tag in Cargo.toml; no lockfile needed.
+/Cargo.lock

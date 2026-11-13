@@ -1,0 +1,101 @@
+{
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "title": "Enable Alibaba Java Development Manual checks",
+      "description": "When off, nothing is reported and the quick fixes disappear too.",
+      "default": true
+    },
+    "group.constant": {
+      "type": "boolean",
+      "title": "Constants",
+      "description": "The long literal suffix must be an uppercase L.",
+      "group": "Rule groups",
+      "default": true
+    },
+    "group.naming": {
+      "type": "boolean",
+      "title": "Naming Style",
+      "description": "Eleven rules: camel case, uppercase constants with underscores, array brackets next to the type, no is prefix on boolean fields, lowercase package names, test classes ending in Test, and a method length limit.",
+      "group": "Rule groups",
+      "default": true
+    },
+    "group.concurrent": {
+      "type": "boolean",
+      "title": "Concurrency",
+      "description": "No Executors thread pools, no explicit new Thread, no Timer, no static SimpleDateFormat, and no static Random.",
+      "group": "Rule groups",
+      "default": true
+    },
+    "group.collection": {
+      "type": "boolean",
+      "title": "Collections",
+      "description": "Pass a correctly typed array to toArray, do not add to or remove from an Arrays.asList result, and do not cast a subList view to ArrayList.",
+      "group": "Rule groups",
+      "default": true
+    },
+    "group.flow": {
+      "type": "boolean",
+      "title": "Flow Control",
+      "description": "Braces on if/for/while/do, a default branch in switch, no return in finally, no add or remove inside foreach, and no + string concatenation in a loop.",
+      "group": "Rule groups",
+      "default": true
+    },
+    "group.oop": {
+      "type": "boolean",
+      "title": "OOP",
+      "description": "Put the string constant, or the object known to be non-null, on the left of equals, and do not construct BigDecimal from a double.",
+      "group": "Rule groups",
+      "default": true
+    },
+    "group.other": {
+      "type": "boolean",
+      "title": "Misc",
+      "description": "Use yyyy rather than YYYY in date patterns, System.currentTimeMillis for the current time, no Apache BeanUtils, no Pattern.compile inside a method body, no int/long cast of Math.random, and no == on floating-point values.",
+      "group": "Rule groups",
+      "default": true
+    },
+    "group.exception": {
+      "type": "boolean",
+      "title": "Exceptions",
+      "description": "@Transactional should specify rollbackFor so checked exceptions also roll back.",
+      "group": "Rule groups",
+      "default": true
+    },
+    "comment.abstractMethodJavadoc": {
+      "type": "boolean",
+      "title": "Abstract and interface methods must have Javadoc",
+      "description": "Leave this off on a legacy project until the comments are filled in, or it will flood the list.",
+      "group": "Comments",
+      "default": false
+    },
+    "comment.enumConstantJavadoc": {
+      "type": "boolean",
+      "title": "Enum constants must have a comment",
+      "description": "Leave this off on a legacy project until the comments are filled in, or it will flood the list.",
+      "group": "Comments",
+      "default": false
+    },
+    "comment.classMustHaveAuthor": {
+      "type": "boolean",
+      "title": "Classes must have an @author tag",
+      "description": "Leave this off on a legacy project until the comments are filled in, or it will flood the list.",
+      "group": "Comments",
+      "default": false
+    },
+    "collection.initCapacity": {
+      "type": "boolean",
+      "title": "Specify an initial capacity for hash collections",
+      "description": "Flags no-arg new HashMap/HashSet and similar. Leave off if you prefer the defaults; it can be noisy.",
+      "group": "Collections",
+      "default": false
+    },
+    "maxMethodLines": {
+      "type": "integer",
+      "title": "Maximum lines per method",
+      "description": "The handbook suggests 80 lines; whole-line comments are not counted. The minimum is 1.",
+      "group": "Thresholds",
+      "default": 80
+    }
+  }
+}

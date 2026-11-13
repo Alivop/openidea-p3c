@@ -1,0 +1,361 @@
+//! 快速修复：只修机械可判定的问题。
+//!
+//! 线程池该怎么建、集合换成哪个实现、方法怎么拆，都要人决定，所以不给修复。
+//! 修复复用规则自己的诊断区间，不另写一套识别逻辑，免得两边判断不一致。
+
+use crate::lex::Kind;
+use crate::rules::{Ctx, RULES, seq};
+use openidea_plugin::providers::CodeAction;
+use openidea_plugin::{Range, TextEdit};
+
+type Build = fn(&Ctx, usize, usize) -> Option<Vec<TextEdit>>;
+
+struct Fix {
+    rule: &'static str,
+    title_zh: &'static str,
+    title_en: &'static str,
+    build: Build,
+}
+
+const FIXES: &[Fix] = &[
+    Fix {
+        rule: "p3c.constant.long-literal-suffix",
+        title_zh: "把 long 后缀改成大写 L",
+        title_en: "Use an uppercase L for the long suffix",
+        build: upper_l,
+    },
+    Fix {
+        rule: "p3c.other.date-pattern-year",
+        title_zh: "把 YYYY 改成 yyyy",
+        title_en: "Change YYYY to yyyy",
+        build: lower_y,
+    },
+    Fix {
+        rule: "p3c.other.current-time-millis",
+        title_zh: "改用 System.currentTimeMillis()",
+        title_en: "Use System.currentTimeMillis()",
+        build: current_millis,
+    },
+    Fix {
+        rule: "p3c.naming.array-brackets",
+        title_zh: "把中括号移到类型后面",
+        title_en: "Move the brackets next to the type",
+        build: move_brackets,
+    },
+    Fix {
+        rule: "p3c.oop.equals-literal-first",
+        title_zh: "交换 equals 的调用方与参数",
+        title_en: "Swap the equals receiver and argument",
+        build: swap_equals,
+    },
+    Fix { rule: "p3c.flow.braces", title_zh: "补上大括号", title_en: "Add braces", build: add_braces },
+];
+
+/// 光标或选区所在行上的问题都给修复，与 IDE 的 Alt+Enter 一致。
+pub fn actions(ctx: &Ctx, path: &str, selection: Range) -> Vec<CodeAction> {
+    let settings = ctx.settings();
+    let mut out = Vec::new();
+    for rule in RULES {
+        let Some(fix) = FIXES.iter().find(|f| f.rule == rule.id) else { continue };
+        if !settings.allows(rule.group) {
+            continue;
+        }
+        for d in (rule.check)(ctx) {
+            if d.range.start.line > selection.end.line || selection.start.line > d.range.end.line {
+                continue;
+            }
+            let (start, end) = (ctx.offset(d.range.start), ctx.offset(d.range.end));
+            let Some(edits) = (fix.build)(ctx, start, end) else { continue };
+            out.push(CodeAction {
+                title: ctx.t(fix.title_zh, fix.title_en).into(),
+                kind: Some("quickfix".into()),
+                preferred: false,
+                edits: vec![(path.to_string(), edits)],
+                data: None,
+            });
+        }
+    }
+    out
+}
+
+fn edit(ctx: &Ctx, start: usize, end: usize, text: &str) -> TextEdit {
+    TextEdit { range: ctx.range(start, end), text: text.into() }
+}
+
+fn upper_l(ctx: &Ctx, start: usize, end: usize) -> Option<Vec<TextEdit>> {
+    Some(vec![edit(ctx, start, end, "L")])
+}
+
+fn lower_y(ctx: &Ctx, start: usize, end: usize) -> Option<Vec<TextEdit>> {
+    Some(vec![edit(ctx, start, end, "yyyy")])
+}
+
+fn current_millis(ctx: &Ctx, start: usize, end: usize) -> Option<Vec<TextEdit>> {
+    Some(vec![edit(ctx, start, end, "System.currentTimeMillis()")])
+}
+
+/// `String args[]` → `String[] args`：类型后插入，名字后删除，一次工作区编辑。
+fn move_brackets(ctx: &Ctx, name_start: usize, _: usize) -> Option<Vec<TextEdit>> {
+    let d = ctx.decl();
+    let named = d
+        .fields
+        .iter()
+        .map(|f| (f.name, f.array_after_name))
+        .chain(d.locals.iter().map(|l| (l.name, l.array_after_name)))
+        .chain(d.methods.iter().flat_map(|m| m.params.iter().map(|p| (p.name, p.array_after_name))));
+    let (name, _) = named.into_iter().find(|(n, after)| *after && n.start == name_start)?;
+    let i = ctx.code.partition_point(|t| t.start < name.start);
+    let ty_end = ctx.code.get(i.checked_sub(1)?)?.end;
+    // 名字后连续的 [] 一起搬走，多维数组才不会只搬一半。
+    let mut j = i + 1;
+    let mut dims = 0;
+    while seq(ctx, j, &["[", "]"]) {
+        j += 2;
+        dims += 1;
+    }
+    if dims == 0 {
+        return None;
+    }
+    Some(vec![edit(ctx, ty_end, ty_end, &"[]".repeat(dims)), edit(ctx, name.end, ctx.code[j - 1].end, "")])
+}
+
+/// `obj.equals("x")` → `"x".equals(obj)`。
+fn swap_equals(ctx: &Ctx, method_start: usize, method_end: usize) -> Option<Vec<TextEdit>> {
+    let i = ctx.code.partition_point(|t| t.start < method_start);
+    let dot = i.checked_sub(1)?;
+    let open = i + 1;
+    let close = ctx.parens()[open]?;
+    let recv_start = receiver_start(ctx, dot)?;
+    let arg = ctx.next_token(ctx.code[open].end)?;
+    if !matches!(arg.kind, Kind::String | Kind::Char) {
+        return None;
+    }
+    // 实参必须是单独一个字面量：`"a" + b` 交换后改变语义，`equals("a", b)` 根本不是 Object.equals。
+    if ctx.next_token(arg.end).map(|t| ctx.slice(t)) != Some(")") {
+        return None;
+    }
+    let recv = &ctx.text[recv_start..ctx.code[dot].start];
+    let method = &ctx.text[method_start..method_end];
+    let literal = &ctx.text[arg.start..arg.end];
+    Some(vec![edit(ctx, recv_start, ctx.code[close].end, &format!("{literal}.{method}({recv})"))])
+}
+
+/// 调用方表达式的起点：标识符、this，以及带括号的调用链。
+fn receiver_start(ctx: &Ctx, dot: usize) -> Option<usize> {
+    let mut i = dot;
+    let mut start = None;
+    while let Some(prev) = i.checked_sub(1) {
+        let t = &ctx.code[prev];
+        match ctx.slice(t) {
+            ")" => {
+                let open = ctx.parens().iter().position(|&c| c == Some(prev))?;
+                start = Some(ctx.code[open].start);
+                i = open;
+            }
+            "." => i = prev,
+            _ if t.kind == Kind::Ident => {
+                start = Some(t.start);
+                i = prev;
+            }
+            _ => break,
+        }
+    }
+    start
+}
+
+/// 给单行语句补大括号：区间到同一层的第一个 `;` 为止。
+fn add_braces(ctx: &Ctx, kw_start: usize, _: usize) -> Option<Vec<TextEdit>> {
+    let i = ctx.code.partition_point(|t| t.start < kw_start);
+    // 从 `)` 或关键字之后开始替换，连同换行与缩进一起吃掉，大括号才留在同一行。
+    let (body, anchor) = match ctx.slice(&ctx.code[i]) {
+        "if" | "for" | "while" => {
+            let close = ctx.parens().get(i + 1).copied().flatten()?;
+            (close + 1, ctx.code[close].end)
+        }
+        _ => (i + 1, ctx.code[i].end),
+    };
+    let first = ctx.code.get(body)?;
+    // 嵌套 if 的 else 归属会变，补大括号可能改变语义，交给人处理。
+    if ctx.slice(first) == "if" {
+        return None;
+    }
+    let mut depth = 0usize;
+    let mut end = None;
+    for j in body..ctx.code.len() {
+        match ctx.slice(&ctx.code[j]) {
+            "(" | "[" | "{" => depth += 1,
+            ")" | "]" | "}" => {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+            }
+            ";" if depth == 0 => {
+                end = Some(ctx.code[j].end);
+                break;
+            }
+            _ => {}
+        }
+    }
+    let end = end?;
+    let text = format!(" {{ {} }}", ctx.text[first.start..end].trim());
+    Some(vec![edit(ctx, anchor, end, &text)])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openidea_plugin::Position;
+    use openidea_plugin::mock::MockHost;
+
+    /// 把修复应用到原文，返回 (标题, 改后的全文)。
+    fn applied(src: &str, line: u32) -> Vec<(String, String)> {
+        let _mock = MockHost::install();
+        let ctx = Ctx::new(src);
+        let sel = Range::new(Position::new(line, 0), Position::new(line, 0));
+        actions(&ctx, "/project/A.java", sel)
+            .into_iter()
+            .map(|a| {
+                let mut text = src.to_string();
+                let mut edits = a.edits[0].1.clone();
+                // 从后往前应用，前面的偏移才不会失效。
+                edits.sort_by_key(|e| std::cmp::Reverse(e.range.start));
+                for e in edits {
+                    let s = ctx.offset(e.range.start);
+                    let t = ctx.offset(e.range.end);
+                    text.replace_range(s..t, &e.text);
+                }
+                (a.title, text)
+            })
+            .collect()
+    }
+
+    fn one(src: &str, line: u32) -> String {
+        let got = applied(src, line);
+        assert_eq!(got.len(), 1, "{got:?}");
+        got.into_iter().next().unwrap().1
+    }
+
+    #[test]
+    fn the_long_suffix_becomes_uppercase() {
+        assert_eq!(one("class A { long n = 2l; }", 0), "class A { long n = 2L; }");
+        assert_eq!(one("class A { long n = 0x1fl; }", 0), "class A { long n = 0x1fL; }");
+    }
+
+    #[test]
+    fn every_week_based_year_in_a_pattern_is_fixed() {
+        let src = "class A { String p = \"YYYY-MM-dd YYYY\"; }";
+        let got = applied(src, 0);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].1, "class A { String p = \"yyyy-MM-dd YYYY\"; }");
+        assert_eq!(got[1].1, "class A { String p = \"YYYY-MM-dd yyyy\"; }");
+    }
+
+    #[test]
+    fn new_date_get_time_becomes_current_time_millis() {
+        assert_eq!(
+            one("class A { long t = new Date().getTime(); }", 0),
+            "class A { long t = System.currentTimeMillis(); }"
+        );
+        assert_eq!(
+            one("class A { long t = new java.util.Date().getTime(); }", 0),
+            "class A { long t = System.currentTimeMillis(); }"
+        );
+    }
+
+    #[test]
+    fn c_style_arrays_move_the_brackets_to_the_type() {
+        assert_eq!(one("class A { void f(String args[]) {} }", 0), "class A { void f(String[] args) {} }");
+        assert_eq!(one("class A { private int vals[]; }", 0), "class A { private int[] vals; }");
+        assert_eq!(one("class A { void f() { int xs[] = null; } }", 0), "class A { void f() { int[] xs = null; } }");
+        assert_eq!(one("class A { void f(String args[][]) {} }", 0), "class A { void f(String[][] args) {} }");
+        assert_eq!(
+            one("class A { void f(java.util.List<String> xs[]) {} }", 0),
+            "class A { void f(java.util.List<String>[] xs) {} }"
+        );
+    }
+
+    #[test]
+    fn equals_swaps_the_literal_to_the_front() {
+        assert_eq!(
+            one("class A { void f() { obj.equals(\"test\"); } }", 0),
+            "class A { void f() { \"test\".equals(obj); } }"
+        );
+        assert_eq!(
+            one("class A { void f() { getObj().equalsIgnoreCase(\"x\"); } }", 0),
+            "class A { void f() { \"x\".equalsIgnoreCase(getObj()); } }"
+        );
+        assert_eq!(
+            one("class A { void f() { a.b.getC().equals('c'); } }", 0),
+            "class A { void f() { 'c'.equals(a.b.getC()); } }"
+        );
+    }
+
+    #[test]
+    fn a_concatenated_argument_is_not_swapped() {
+        assert!(applied("class A { void f() { obj.equals(\"a\" + b); } }", 0).is_empty());
+        assert!(applied("class A { void f() { obj.equals(\"a\", b); } }", 0).is_empty());
+    }
+
+    #[test]
+    fn braces_wrap_the_single_statement() {
+        assert_eq!(one("class A { void f() { if (ok) run(); } }", 0), "class A { void f() { if (ok) { run(); } } }");
+        assert_eq!(
+            one("class A { void f() { while (ok) run(); } }", 0),
+            "class A { void f() { while (ok) { run(); } } }"
+        );
+        assert_eq!(
+            one("class A { void f() { do run(); while (ok); } }", 0),
+            "class A { void f() { do { run(); } while (ok); } }"
+        );
+        // if 与 else 各是一条问题，也就各有一条修复。
+        let both = applied("class A { void f() { if (a) x(); else y(); } }", 0);
+        assert_eq!(both.len(), 2);
+        assert_eq!(both[0].1, "class A { void f() { if (a) { x(); } else y(); } }");
+        assert_eq!(both[1].1, "class A { void f() { if (a) x(); else { y(); } } }");
+        assert_eq!(
+            one("class A { void f() { for (int i = 0; i < 9; i++) sum(i); } }", 0),
+            "class A { void f() { for (int i = 0; i < 9; i++) { sum(i); } } }"
+        );
+    }
+
+    #[test]
+    fn the_outer_if_of_a_nested_pair_is_left_to_the_author() {
+        // 外层补括号会把 else 抢过去；内层 if 与 else 各补各的，都不改变 else 的归属。
+        let got = applied("class A { void f() { if (a) if (b) x(); else y(); } }", 0);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].1, "class A { void f() { if (a) if (b) { x(); } else y(); } }");
+        assert_eq!(got[1].1, "class A { void f() { if (a) if (b) x(); else { y(); } } }");
+    }
+
+    #[test]
+    fn a_multiline_body_keeps_its_indentation() {
+        let src = "class A {\n    void f() {\n        if (ok)\n            run();\n    }\n}";
+        let got = applied(src, 2);
+        assert_eq!(got.len(), 1);
+        assert!(got[0].1.contains("if (ok) { run(); }"), "{}", got[0].1);
+    }
+
+    #[test]
+    fn fixes_follow_the_switches_and_the_cursor_line() {
+        let mock = MockHost::install();
+        let src = "class A {\n    long n = 2l;\n    long m = 3l;\n}";
+        let ctx = Ctx::new(src);
+        let on_line = Range::new(Position::new(1, 0), Position::new(1, 0));
+        assert_eq!(actions(&ctx, "/project/A.java", on_line).len(), 1);
+
+        mock.set_setting("group.constant", "false");
+        assert!(actions(&Ctx::new(src), "/project/A.java", on_line).is_empty());
+        mock.set_setting("group.constant", "true");
+        mock.set_setting("enabled", "false");
+        assert!(actions(&Ctx::new(src), "/project/A.java", on_line).is_empty());
+    }
+
+    #[test]
+    fn chinese_text_before_a_fix_keeps_the_columns_right() {
+        let src = "class A { String 说明 = \"中文\"; long n = 2l; }";
+        assert_eq!(one(src, 0), "class A { String 说明 = \"中文\"; long n = 2L; }");
+        let src = "class A { void f() { 对象.equals(\"测试\"); } }";
+        assert_eq!(one(src, 0), "class A { void f() { \"测试\".equals(对象); } }");
+    }
+}

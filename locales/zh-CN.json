@@ -1,0 +1,45 @@
+{
+  "Java Coding Guidelines: Scan Project": "Java Coding Guidelines：扫描项目",
+
+  "Enable Alibaba Java Development Manual checks": "启用阿里巴巴 Java 开发手册检查",
+  "When off, nothing is reported and the quick fixes disappear too.": "关闭后不再报告任何问题，快速修复也随之消失。",
+
+  "Rule groups": "规则分组",
+  "Comments": "注释规约",
+  "Collections": "集合处理",
+  "Thresholds": "阈值",
+
+  "Constants": "常量定义",
+  "The long literal suffix must be an uppercase L.": "long 字面量后缀必须大写 L。",
+
+  "Naming Style": "命名风格",
+  "Eleven rules: camel case, uppercase constants with underscores, array brackets next to the type, no is prefix on boolean fields, lowercase package names, test classes ending in Test, and a method length limit.": "驼峰命名、常量全大写下划线、数组中括号紧跟类型、布尔字段不加 is 前缀、包名小写、测试类以 Test 结尾、方法行数上限等 11 条。",
+
+  "Concurrency": "并发处理",
+  "No Executors thread pools, no explicit new Thread, no Timer, no static SimpleDateFormat, and no static Random.": "线程池不用 Executors、不显式 new Thread、不用 Timer、SimpleDateFormat 与 Random 不做静态字段。",
+
+  "Pass a correctly typed array to toArray, do not add to or remove from an Arrays.asList result, and do not cast a subList view to ArrayList.": "toArray 传入类型正确的数组、Arrays.asList 结果不做增删、subList 视图不强转 ArrayList。",
+
+  "Flow Control": "控制语句",
+  "Braces on if/for/while/do, a default branch in switch, no return in finally, no add or remove inside foreach, and no + string concatenation in a loop.": "if/for/while/do 必须带大括号、switch 必须有 default、finally 中不 return、foreach 中不增删元素、循环内不用 + 拼接字符串。",
+
+  "OOP": "OOP 规约",
+  "Put the string constant, or the object known to be non-null, on the left of equals, and do not construct BigDecimal from a double.": "字符串常量或确定非空的对象放在 equals 左侧、不用 double 构造 BigDecimal。",
+
+  "Misc": "其它",
+  "Use yyyy rather than YYYY in date patterns, System.currentTimeMillis for the current time, no Apache BeanUtils, no Pattern.compile inside a method body, no int/long cast of Math.random, and no == on floating-point values.": "日期格式用 yyyy 而非 YYYY、取当前毫秒用 System.currentTimeMillis、不用 Apache BeanUtils、Pattern 不在方法体内编译、Math.random 不强转 int/long、浮点数不用 == 判等。",
+
+  "Exceptions": "异常日志",
+  "@Transactional should specify rollbackFor so checked exceptions also roll back.": "@Transactional 应指定 rollbackFor，使受检异常也能回滚。",
+
+  "Abstract and interface methods must have Javadoc": "抽象方法与接口方法必须有 Javadoc",
+  "Enum constants must have a comment": "枚举常量必须有注释",
+  "Classes must have an @author tag": "类必须有 @author 标注",
+  "Leave this off on a legacy project until the comments are filled in, or it will flood the list.": "老项目补齐注释之前建议关闭，否则会刷屏。",
+
+  "Specify an initial capacity for hash collections": "哈希集合指定初始容量",
+  "Flags no-arg new HashMap/HashSet and similar. Leave off if you prefer the defaults; it can be noisy.": "检查无参的 new HashMap/HashSet 等。偏好默认容量可关闭，此规则可能较多。",
+
+  "Maximum lines per method": "单个方法的最大行数",
+  "The handbook suggests 80 lines; whole-line comments are not counted. The minimum is 1.": "手册建议 80 行，整行注释不计入；最小值为 1。"
+}
