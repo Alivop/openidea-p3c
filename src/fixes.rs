@@ -140,7 +140,7 @@ fn swap_equals(ctx: &Ctx, method_start: usize, method_end: usize) -> Option<Vec<
     Some(vec![edit(ctx, recv_start, ctx.code[close].end, &format!("{literal}.{method}({recv})"))])
 }
 
-/// 调用方表达式的起点：标识符、this，以及带括号的调用链。
+/// 调用方表达式的起点：标识符、this/super/new 与带括号的调用链；扫到语句关键字或表达式边界即停。
 fn receiver_start(ctx: &Ctx, dot: usize) -> Option<usize> {
     let mut i = dot;
     let mut start = None;
@@ -153,7 +153,7 @@ fn receiver_start(ctx: &Ctx, dot: usize) -> Option<usize> {
                 i = open;
             }
             "." => i = prev,
-            _ if t.kind == Kind::Ident => {
+            _ if t.kind == Kind::Ident && !keyword_boundary(ctx.slice(t)) => {
                 start = Some(t.start);
                 i = prev;
             }
@@ -161,6 +161,68 @@ fn receiver_start(ctx: &Ctx, dot: usize) -> Option<usize> {
         }
     }
     start
+}
+
+/// 关键字也被词法器标成 Ident，但只有 this/super/new 属于调用方；return/throw/yield 等是边界，纳入会产出非法代码。
+fn keyword_boundary(s: &str) -> bool {
+    const BOUNDARY: &[&str] = &[
+        "abstract",
+        "assert",
+        "boolean",
+        "break",
+        "byte",
+        "case",
+        "catch",
+        "char",
+        "class",
+        "const",
+        "continue",
+        "default",
+        "do",
+        "double",
+        "else",
+        "enum",
+        "extends",
+        "final",
+        "finally",
+        "float",
+        "for",
+        "goto",
+        "if",
+        "implements",
+        "import",
+        "instanceof",
+        "int",
+        "interface",
+        "long",
+        "native",
+        "package",
+        "private",
+        "protected",
+        "public",
+        "return",
+        "short",
+        "static",
+        "strictfp",
+        "switch",
+        "synchronized",
+        "throw",
+        "throws",
+        "transient",
+        "try",
+        "void",
+        "volatile",
+        "while",
+        "true",
+        "false",
+        "null",
+        "var",
+        "yield",
+        "record",
+        "sealed",
+        "permits",
+    ];
+    BOUNDARY.contains(&s)
 }
 
 /// 给单行语句补大括号：区间到同一层的第一个 `;` 为止。
@@ -295,6 +357,44 @@ mod tests {
     fn a_concatenated_argument_is_not_swapped() {
         assert!(applied("class A { void f() { obj.equals(\"a\" + b); } }", 0).is_empty());
         assert!(applied("class A { void f() { obj.equals(\"a\", b); } }", 0).is_empty());
+    }
+
+    #[test]
+    fn a_return_keyword_stays_outside_the_swap() {
+        assert_eq!(
+            one("class A { boolean f(String obj) { return obj.equals(\"x\"); } }", 0),
+            "class A { boolean f(String obj) { return \"x\".equals(obj); } }"
+        );
+        assert_eq!(
+            one("class A { boolean f() { return a.b.getC().equals(\"x\"); } }", 0),
+            "class A { boolean f() { return \"x\".equals(a.b.getC()); } }"
+        );
+        assert_eq!(
+            one("class A { boolean f() { return getObj().equalsIgnoreCase(\"x\"); } }", 0),
+            "class A { boolean f() { return \"x\".equalsIgnoreCase(getObj()); } }"
+        );
+    }
+
+    #[test]
+    fn new_this_and_super_receivers_stay_intact() {
+        assert_eq!(
+            one("class A { boolean f() { return new Foo().equals(\"x\"); } }", 0),
+            "class A { boolean f() { return \"x\".equals(new Foo()); } }"
+        );
+        assert_eq!(
+            one("class A { boolean f() { return this.equals(\"x\"); } }", 0),
+            "class A { boolean f() { return \"x\".equals(this); } }"
+        );
+        assert_eq!(
+            one("class A { boolean f() { return super.equals(\"x\"); } }", 0),
+            "class A { boolean f() { return \"x\".equals(super); } }"
+        );
+    }
+
+    #[test]
+    fn a_literal_receiver_is_conservatively_left_alone() {
+        // null 是字面量关键字而非可交换的调用方，宁可不给修复也不产出非法代码。
+        assert!(applied("class A { boolean f() { return null.equals(\"x\"); } }", 0).is_empty());
     }
 
     #[test]
