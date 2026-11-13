@@ -116,7 +116,53 @@ fn move_brackets(ctx: &Ctx, name_start: usize, _: usize) -> Option<Vec<TextEdit>
     if dims == 0 {
         return None;
     }
+    // 参数各自带类型，逗号不是共享声明；字段/局部变量共享类型时搬 [] 会改坏兄弟声明符，整体跳过。
+    let is_param = d.methods.iter().flat_map(|m| &m.params).any(|p| p.name.start == name_start);
+    if !is_param && shared_declaration(ctx, i, j) {
+        return None;
+    }
     Some(vec![edit(ctx, ty_end, ty_end, &"[]".repeat(dims)), edit(ctx, name.end, ctx.code[j - 1].end, "")])
+}
+
+/// 名字是否属于多声明符语句（`int a[], b` / `int a, b[]`）。从名字向两侧扫到语句边界，
+/// 同层出现逗号即共享：往前是后续兄弟，往后（跳过泛型 `<>`）是前驱兄弟。把 [] 搬到公共
+/// 类型上会改变兄弟的维度，甚至产出 `int a,[] b`，所以这类声明宁可不修。
+fn shared_declaration(ctx: &Ctx, name: usize, after_dims: usize) -> bool {
+    let mut depth = 0usize;
+    let mut k = after_dims;
+    while k < ctx.code.len() {
+        match ctx.slice(&ctx.code[k]) {
+            ";" => break,
+            "(" | "[" | "{" => depth += 1,
+            ")" | "]" | "}" => {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+            }
+            "," if depth == 0 => return true,
+            _ => {}
+        }
+        k += 1;
+    }
+    let mut depth = 0usize;
+    let mut k = name;
+    while k > 0 {
+        k -= 1;
+        match ctx.slice(&ctx.code[k]) {
+            ";" | "{" | "}" => break,
+            ")" | "]" | ">" => depth += 1,
+            "(" | "[" | "<" => {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+            }
+            "," if depth == 0 => return true,
+            _ => {}
+        }
+    }
+    false
 }
 
 /// `obj.equals("x")` → `"x".equals(obj)`。
@@ -276,8 +322,9 @@ fn add_braces(ctx: &Ctx, kw_start: usize, _: usize) -> Option<Vec<TextEdit>> {
         _ => (i + 1, ctx.code[i].end),
     };
     let first = ctx.code.get(body)?;
-    // 嵌套 if 的 else 归属会变，补大括号可能改变语义，交给人处理。
-    if ctx.slice(first) == "if" {
+    // body 本身是控制流语句时，第一个 ; 往往只是其内部子语句的结尾：补大括号会截断它，
+    // 把悬垂 else 抢给外层，或漏掉 do/while 的后续部分。这类复杂 body 交给人处理。
+    if matches!(ctx.slice(first), "if" | "while" | "for" | "do" | "switch" | "try" | "synchronized") {
         return None;
     }
     let mut depth = 0usize;
@@ -373,6 +420,27 @@ mod tests {
         assert_eq!(
             one("class A { void f(java.util.List<String> xs[]) {} }", 0),
             "class A { void f(java.util.List<String>[] xs) {} }"
+        );
+    }
+
+    #[test]
+    fn a_shared_array_declaration_is_omitted_to_preserve_siblings() {
+        // 第一个声明符带 []：搬到公共类型会把兄弟 b 也变成数组（b = 1 随后无法编译）。
+        assert!(applied("class A { int a[], b; void f() { b = 1; } }", 0).is_empty());
+        // 后面的声明符带 []：类型位其实是逗号，搬过去会产出 `int a,[] b` 这类非法代码。
+        assert!(applied("class A { int a, b[]; }", 0).is_empty());
+        // 局部变量共享声明同样跳过。
+        assert!(applied("class A { void f() { int a[], b; b = 1; } }", 0).is_empty());
+    }
+
+    #[test]
+    fn a_lone_array_declaration_still_moves_the_brackets() {
+        assert_eq!(one("class A { int a[]; }", 0), "class A { int[] a; }");
+        assert_eq!(one("class A { void f() { int a[] = {1, 2}; } }", 0), "class A { void f() { int[] a = {1, 2}; } }");
+        // 泛型实参里的逗号不是声明符分隔符，单独的泛型数组字段照常修。
+        assert_eq!(
+            one("class A { java.util.Map<String, Integer> a[]; }", 0),
+            "class A { java.util.Map<String, Integer>[] a; }"
         );
     }
 
@@ -525,6 +593,18 @@ mod tests {
         assert_eq!(got.len(), 2);
         assert_eq!(got[0].1, "class A { void f() { if (a) if (b) { x(); } else y(); } }");
         assert_eq!(got[1].1, "class A { void f() { if (a) if (b) x(); else { y(); } } }");
+    }
+
+    #[test]
+    fn a_control_flow_body_is_omitted_to_preserve_the_dangling_else() {
+        // 外层 if 的 body 是 while、while 的 body 是 if：在第一个 ; 处补括号会截断内层语句，
+        // 把 else 抢给外层，改变运行结果。这两条整体跳过；内层 if 与 else 的 body 是表达式，
+        // 各补各的，else 归属不变（javac + 运行轨迹另行核验）。
+        let src = "class A { void f() { if (outer) while (n++ == 0) if (inner) yes(); else no(); } }";
+        let got = applied(src, 0);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].1, "class A { void f() { if (outer) while (n++ == 0) if (inner) { yes(); } else no(); } }");
+        assert_eq!(got[1].1, "class A { void f() { if (outer) while (n++ == 0) if (inner) yes(); else { no(); } } }");
     }
 
     #[test]
