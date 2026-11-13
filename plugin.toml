@@ -1,10 +1,10 @@
 id = "alivop.p3c"
 name = "Java Coding Guidelines"
-version = "0.1.2"
+version = "0.1.3"
 description = "Checks Java files against the Alibaba Java Development Manual (P3C) while you type, with quick fixes and a project-wide scan; diagnostics appear automatically once installed or enabled. Pure WebAssembly (no PMD/JDK).\nSettings: Settings → Plugins → Java Coding Guidelines (master switch + per-group switches).\nScan: Tools → Java Coding Guidelines: Scan Project.\n中文：边写边按《阿里巴巴 Java 开发手册》（P3C）检查 Java 文件，提供快速修复与全项目扫描；安装或启用后自动出诊断。纯 WebAssembly（无需 PMD/JDK）。\n设置路径：设置 → 插件 → Java Coding Guidelines（总开关 + 按组开关）。\n扫描路径：工具 → Java Coding Guidelines: Scan Project。"
 authors = ["Alivop"]
 license = "Apache-2.0"
-change-notes = "0.1.2 — harden the equals quick fix.\n- A generic method receiver is now moved whole: A.<String>value().equals(\"x\") becomes \"x\".equals(A.<String>value()), keeping the <...> type arguments with the call instead of splitting them onto the literal.\n- Bare super is no longer swapped: super.equals(\"x\") is left alone because \"x\".equals(super) does not compile; valid super.method() chains are still swapped.\n- Both behaviours are covered by regression tests whose transformed Java was verified to compile.\n\n中文：0.1.2 加固 equals 快速修复。\n- 泛型方法调用方现在整体搬移：A.<String>value().equals(\"x\") 变为 \"x\".equals(A.<String>value())，把 <...> 类型参数随调用一起保留，而不是拆到字面量上。\n- 不再交换裸 super：super.equals(\"x\") 保持原样，因为 \"x\".equals(super) 无法编译；合法的 super.method() 链仍会交换。\n- 两种行为均有回归测试覆盖，且变换后的 Java 已验证可编译。"
+change-notes = "0.1.3 — require a complete receiver for the equals quick fix.\n- The swap is omitted when the receiver root cannot be parsed completely (e.g. an array element args[0].trim() or a string literal \" a \".trim()), instead of moving only a suffix and producing code that does not compile. Parenthesized roots such as (args[0]).trim() are still swapped.\n- Qualifier-only super is omitted in both spellings: super.equals(\"x\") and A.super.equals(\"x\") are left alone, while super.method() / A.super.method() chains are still swapped.\n- Added array/literal/qualified-super regressions; every offered transformation was verified to compile with javac.\n\n中文：0.1.3 equals 快速修复要求完整调用方。\n- 当调用方根部无法完整解析（如数组元素 args[0].trim()、字符串字面量 \" a \".trim()）时跳过交换，不再只搬移后缀而生成无法编译的代码；加括号的根部（如 (args[0]).trim()）仍会交换。\n- 限定符-only 的 super 两种写法都跳过：super.equals(\"x\") 与 A.super.equals(\"x\") 保持原样，而 super.method() / A.super.method() 链仍会交换。\n- 新增数组/字面量/限定 super 回归测试；每个提供的变换均已用 javac 验证可编译。"
 categories = ["linters"]
 engines.openidea = "^1.6"
 wasm = "dist/plugin.wasm"

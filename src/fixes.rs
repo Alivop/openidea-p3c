@@ -135,8 +135,9 @@ fn swap_equals(ctx: &Ctx, method_start: usize, method_end: usize) -> Option<Vec<
         return None;
     }
     let recv = &ctx.text[recv_start..ctx.code[dot].start];
-    // 裸 super 只能作方法限定符，不能作实参：`"x".equals(super)` 编译不过，保守跳过（super.method() 链不受影响）。
-    if recv.trim() == "super" {
+    // super（含 A.super 这类限定形式）只能作方法限定符，不能作实参：`"x".equals(super)` / `"x".equals(A.super)` 编译不过。
+    // 调用方最后一个 token 是 super 即为限定符-only；super.method() 链以 `)` 结尾，不受影响。
+    if ctx.slice(&ctx.code[dot - 1]) == "super" {
         return None;
     }
     let method = &ctx.text[method_start..method_end];
@@ -145,10 +146,12 @@ fn swap_equals(ctx: &Ctx, method_start: usize, method_end: usize) -> Option<Vec<
 }
 
 /// 调用方表达式的起点：标识符、this/super/new、带括号的调用链与泛型限定（A.<T>value()）；
-/// 扫到语句关键字或表达式边界即停，调用方跨度不完整时返回 None。
+/// 扫到语句关键字或表达式边界即停。跨过一个 `.` 后若无法在其左侧确立完整主表达式
+/// （如数组下标 `]`、字面量调用方），返回 None 而非已收集的后缀，避免产出残缺替换。
 fn receiver_start(ctx: &Ctx, dot: usize) -> Option<usize> {
     let mut i = dot;
     let mut start = None;
+    let mut pending_dot = false;
     while let Some(prev) = i.checked_sub(1) {
         let t = &ctx.code[prev];
         match ctx.slice(t) {
@@ -156,22 +159,28 @@ fn receiver_start(ctx: &Ctx, dot: usize) -> Option<usize> {
                 let open = ctx.parens().iter().position(|&c| c == Some(prev))?;
                 start = Some(ctx.code[open].start);
                 i = open;
+                pending_dot = false;
             }
             // 泛型方法调用 A.<T>value()：连同 <T> 一起保留，否则 A.<T> 会落在替换区外、贴到字面量上。
             ">" => {
                 let open = matching_angle_back(ctx, prev)?;
                 start = Some(ctx.code[open].start);
                 i = open;
+                pending_dot = false;
             }
-            "." => i = prev,
+            "." => {
+                i = prev;
+                pending_dot = true;
+            }
             _ if t.kind == Kind::Ident && !keyword_boundary(ctx.slice(t)) => {
                 start = Some(t.start);
                 i = prev;
+                pending_dot = false;
             }
             _ => break,
         }
     }
-    start
+    if pending_dot { None } else { start }
 }
 
 /// 从 `close` 处的 `>` 向左找匹配的 `<`（skip_generics 的反向）；找不到说明它是比较运算符而非泛型，返回 None。
@@ -450,6 +459,41 @@ mod tests {
     fn a_literal_receiver_is_conservatively_left_alone() {
         // null 是字面量关键字而非可交换的调用方，宁可不给修复也不产出非法代码。
         assert!(applied("class A { boolean f() { return null.equals(\"x\"); } }", 0).is_empty());
+    }
+
+    #[test]
+    fn an_unsupported_chain_root_is_omitted_not_partially_swapped() {
+        // 数组下标 / 字面量调用方无法完整解析：宁可跳过，也不产出 args[0]."x".equals(trim()) 这类残缺替换。
+        assert!(applied("class A { boolean f(String[] args) { return args[0].trim().equals(\"x\"); } }", 0).is_empty());
+        assert!(applied("class A { boolean f() { return \" a \".trim().equals(\"x\"); } }", 0).is_empty());
+    }
+
+    #[test]
+    fn a_parenthesized_array_root_is_swapped() {
+        // 加括号后调用方是完整的括号表达式，可安全交换。
+        assert_eq!(
+            one("class A { boolean f(String[] args) { return (args[0]).trim().equals(\"x\"); } }", 0),
+            "class A { boolean f(String[] args) { return \"x\".equals((args[0]).trim()); } }"
+        );
+    }
+
+    #[test]
+    fn qualified_super_is_omitted_but_its_chain_is_swapped() {
+        // A.super 与裸 super 一样只是限定符，不能作实参；A.super.toString() 是合法调用方。
+        assert!(applied("class A { class Inner { boolean f() { return A.super.equals(\"x\"); } } }", 0).is_empty());
+        assert_eq!(
+            one("class A { class Inner { boolean f() { return A.super.toString().equals(\"x\"); } } }", 0),
+            "class A { class Inner { boolean f() { return \"x\".equals(A.super.toString()); } } }"
+        );
+    }
+
+    #[test]
+    fn an_identifier_ending_in_super_is_still_swapped() {
+        // 仅当调用方最后一个 token 恰为 super 才跳过，mysuper 这类普通标识符不受影响。
+        assert_eq!(
+            one("class A { boolean f(String mysuper) { return mysuper.equals(\"x\"); } }", 0),
+            "class A { boolean f(String mysuper) { return \"x\".equals(mysuper); } }"
+        );
     }
 
     #[test]
