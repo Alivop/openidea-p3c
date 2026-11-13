@@ -132,7 +132,8 @@ fn shared_declaration(ctx: &Ctx, name: usize, after_dims: usize) -> bool {
     let mut k = after_dims;
     while k < ctx.code.len() {
         match ctx.slice(&ctx.code[k]) {
-            ";" => break,
+            // 只有同层的 ; 才是声明结尾；初始化器里匿名类/块 lambda 内的 ; 处于嵌套层，要跳过。
+            ";" if depth == 0 => break,
             "(" | "[" | "{" => depth += 1,
             ")" | "]" | "}" => {
                 if depth == 0 {
@@ -322,9 +323,10 @@ fn add_braces(ctx: &Ctx, kw_start: usize, _: usize) -> Option<Vec<TextEdit>> {
         _ => (i + 1, ctx.code[i].end),
     };
     let first = ctx.code.get(body)?;
-    // body 本身是控制流语句时，第一个 ; 往往只是其内部子语句的结尾：补大括号会截断它，
-    // 把悬垂 else 抢给外层，或漏掉 do/while 的后续部分。这类复杂 body 交给人处理。
-    if matches!(ctx.slice(first), "if" | "while" | "for" | "do" | "switch" | "try" | "synchronized") {
+    // body 本身是控制流语句、或带标签（`label: …`）时，第一个 ; 往往只是其内部子语句的结尾：
+    // 补大括号会截断它，把悬垂 else 抢给外层，或漏掉 do/while 的后续部分。这类复杂 body 交给人处理。
+    let labelled = ctx.code.get(body + 1).is_some_and(|t| ctx.slice(t) == ":");
+    if labelled || matches!(ctx.slice(first), "if" | "while" | "for" | "do" | "switch" | "try" | "synchronized") {
         return None;
     }
     let mut depth = 0usize;
@@ -441,6 +443,19 @@ mod tests {
         assert_eq!(
             one("class A { java.util.Map<String, Integer> a[]; }", 0),
             "class A { java.util.Map<String, Integer>[] a; }"
+        );
+    }
+
+    #[test]
+    fn a_shared_declaration_with_a_nested_initializer_is_omitted() {
+        // 初始化器里的匿名类 / 块 lambda 含 ;，前向扫描必须按深度跳过它，才能发现后面的兄弟 b。
+        assert!(
+            applied("class A { Object a[] = { new Object() { int x; } }, b; void f() { b = new Object(); } }", 0)
+                .is_empty()
+        );
+        assert!(
+            applied("class A { Runnable a[] = { () -> { System.out.print(1); } }, b; void f() { b = () -> {}; } }", 0)
+                .is_empty()
         );
     }
 
@@ -605,6 +620,23 @@ mod tests {
         assert_eq!(got.len(), 2);
         assert_eq!(got[0].1, "class A { void f() { if (outer) while (n++ == 0) if (inner) { yes(); } else no(); } }");
         assert_eq!(got[1].1, "class A { void f() { if (outer) while (n++ == 0) if (inner) yes(); else { no(); } } }");
+    }
+
+    #[test]
+    fn a_labelled_control_flow_body_is_omitted_to_preserve_the_dangling_else() {
+        // 标签前缀让首 token 不再是控制流关键字，但 body 仍是完整嵌套语句：外层 if 同样跳过，
+        // 内层 if 与 else 各补各的，else 归属不变（javac + 运行轨迹另行核验）。
+        let src = "class A { void f() { if (outer) label: while (n++ == 0) if (inner) yes(); else no(); } }";
+        let got = applied(src, 0);
+        assert_eq!(got.len(), 2);
+        assert_eq!(
+            got[0].1,
+            "class A { void f() { if (outer) label: while (n++ == 0) if (inner) { yes(); } else no(); } }"
+        );
+        assert_eq!(
+            got[1].1,
+            "class A { void f() { if (outer) label: while (n++ == 0) if (inner) yes(); else { no(); } } }"
+        );
     }
 
     #[test]
