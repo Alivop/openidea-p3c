@@ -135,12 +135,17 @@ fn swap_equals(ctx: &Ctx, method_start: usize, method_end: usize) -> Option<Vec<
         return None;
     }
     let recv = &ctx.text[recv_start..ctx.code[dot].start];
+    // 裸 super 只能作方法限定符，不能作实参：`"x".equals(super)` 编译不过，保守跳过（super.method() 链不受影响）。
+    if recv.trim() == "super" {
+        return None;
+    }
     let method = &ctx.text[method_start..method_end];
     let literal = &ctx.text[arg.start..arg.end];
     Some(vec![edit(ctx, recv_start, ctx.code[close].end, &format!("{literal}.{method}({recv})"))])
 }
 
-/// 调用方表达式的起点：标识符、this/super/new 与带括号的调用链；扫到语句关键字或表达式边界即停。
+/// 调用方表达式的起点：标识符、this/super/new、带括号的调用链与泛型限定（A.<T>value()）；
+/// 扫到语句关键字或表达式边界即停，调用方跨度不完整时返回 None。
 fn receiver_start(ctx: &Ctx, dot: usize) -> Option<usize> {
     let mut i = dot;
     let mut start = None;
@@ -149,6 +154,12 @@ fn receiver_start(ctx: &Ctx, dot: usize) -> Option<usize> {
         match ctx.slice(t) {
             ")" => {
                 let open = ctx.parens().iter().position(|&c| c == Some(prev))?;
+                start = Some(ctx.code[open].start);
+                i = open;
+            }
+            // 泛型方法调用 A.<T>value()：连同 <T> 一起保留，否则 A.<T> 会落在替换区外、贴到字面量上。
+            ">" => {
+                let open = matching_angle_back(ctx, prev)?;
                 start = Some(ctx.code[open].start);
                 i = open;
             }
@@ -161,6 +172,25 @@ fn receiver_start(ctx: &Ctx, dot: usize) -> Option<usize> {
         }
     }
     start
+}
+
+/// 从 `close` 处的 `>` 向左找匹配的 `<`（skip_generics 的反向）；找不到说明它是比较运算符而非泛型，返回 None。
+fn matching_angle_back(ctx: &Ctx, close: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut j = close;
+    loop {
+        match ctx.slice(&ctx.code[j]) {
+            ">" => depth += 1,
+            "<" => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(j);
+                }
+            }
+            _ => {}
+        }
+        j = j.checked_sub(1)?;
+    }
 }
 
 /// 关键字也被词法器标成 Ident，但只有 this/super/new 属于调用方；return/throw/yield 等是边界，纳入会产出非法代码。
@@ -376,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn new_this_and_super_receivers_stay_intact() {
+    fn new_and_this_receivers_stay_intact() {
         assert_eq!(
             one("class A { boolean f() { return new Foo().equals(\"x\"); } }", 0),
             "class A { boolean f() { return \"x\".equals(new Foo()); } }"
@@ -385,9 +415,34 @@ mod tests {
             one("class A { boolean f() { return this.equals(\"x\"); } }", 0),
             "class A { boolean f() { return \"x\".equals(this); } }"
         );
+    }
+
+    #[test]
+    fn bare_super_is_omitted_but_a_super_chain_is_swapped() {
+        // 裸 super 不能作实参，跳过；super.toString() 是合法调用方，照常交换。
+        assert!(applied("class A { boolean f() { return super.equals(\"x\"); } }", 0).is_empty());
         assert_eq!(
-            one("class A { boolean f() { return super.equals(\"x\"); } }", 0),
-            "class A { boolean f() { return \"x\".equals(super); } }"
+            one("class A { boolean f() { return super.toString().equals(\"x\"); } }", 0),
+            "class A { boolean f() { return \"x\".equals(super.toString()); } }"
+        );
+    }
+
+    #[test]
+    fn a_generic_method_receiver_is_kept_whole() {
+        // 期望输出均为合法 Java：A 声明了 static <T> T value()，泛型限定连同调用方一起搬移。
+        assert_eq!(
+            one(
+                "class A { static <T> T value() { return null; } boolean f() { return A.<String>value().equals(\"x\"); } }",
+                0
+            ),
+            "class A { static <T> T value() { return null; } boolean f() { return \"x\".equals(A.<String>value()); } }"
+        );
+        assert_eq!(
+            one(
+                "class A { static <T> T value() { return null; } boolean f() { return A.<java.util.Map<String, Integer>>value().equals(\"x\"); } }",
+                0
+            ),
+            "class A { static <T> T value() { return null; } boolean f() { return \"x\".equals(A.<java.util.Map<String, Integer>>value()); } }"
         );
     }
 
