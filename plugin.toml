@@ -1,11 +1,13 @@
 id = "alivop.p3c"
 name = "Java Coding Guidelines"
-version = "0.1.5"
+version = "0.1.6"
 description = "Checks Java files against the Alibaba Java Development Manual (P3C) while you type, with quick fixes and a project-wide scan; diagnostics appear automatically once installed or enabled. Pure WebAssembly (no PMD/JDK).\nSettings: Settings → Plugins → Java Coding Guidelines (master switch + per-group switches).\nScan: Tools → Java Coding Guidelines: Scan Project.\n中文：边写边按《阿里巴巴 Java 开发手册》（P3C）检查 Java 文件，提供快速修复与全项目扫描；安装或启用后自动出诊断。纯 WebAssembly（无需 PMD/JDK）。\n设置路径：设置 → 插件 → Java Coding Guidelines（总开关 + 按组开关）。\n扫描路径：工具 → Java Coding Guidelines: Scan Project。"
 authors = ["Alivop"]
 license = "Apache-2.0"
-change-notes = "0.1.5 — close two boundary gaps in the same quick-fix safeguards.\n- Move-brackets: the shared-declaration scan now only treats a same-level ; as the declaration boundary, so a ; inside an anonymous class or block lambda in the initializer (Object a[] = { new Object() { int x; } }, b; or Runnable a[] = { () -> { ... } }, b;) no longer hides the later sibling. These shared declarations are omitted instead of moving [] onto the common type and changing the sibling's type.\n- Add-braces: a labelled body (label: while ... / label: if ...) is now omitted too, so the label prefix no longer bypasses the control-flow guard and truncates the embedded statement, re-binding its dangling else.\n- Added anonymous-class/block-lambda and labelled-body regressions; verified with javac (the buggy rewrites fail to compile) and a bounded execution fixture (the offered rewrites keep the original traces).\n\n中文：0.1.5 补齐同一组快速修复防护的两个边界缺口。\n- 移动中括号：共享声明扫描现在只把同层的 ; 当作声明结尾，初始化器里匿名类/块 lambda 内部的 ;（Object a[] = { new Object() { int x; } }, b; 或 Runnable a[] = { () -> { ... } }, b;）不再遮住后面的兄弟声明符。这类共享声明整体跳过，不再把 [] 搬到公共类型上而改变兄弟的类型。\n- 补大括号：带标签的 body（label: while … / label: if …）也整体跳过，标签前缀不再绕过控制流守卫、截断内嵌语句并抢走悬垂 else。\n- 新增匿名类/块 lambda 与带标签 body 回归测试；已用 javac（错误改写无法编译）与有界运行轨迹夹具（提供的改写保持原轨迹）核验。"
+change-notes = "0.1.6 — add a plugin icon (marketplace + Settings).\n- New icon: code braces { } around a passing check on an indigo-to-blue-to-cyan tile, with light and dark variants (icons/p3c.svg, icons/p3c_dark.svg). Original artwork; sanitiser-safe SVG (gradients, clip path, soft drop shadow), well under the 16 KiB limit; no Java or Alibaba trademarks.\n- No rule, quick-fix, diagnostic or behavior changes. The WebAssembly component is rebuilt from the same source with the same pinned SDK; only the icon files and version metadata differ from 0.1.5.\n\n中文：0.1.6 新增插件图标（市场 + 设置）。\n- 新图标：靛蓝→蓝→青色底上，代码括号 { } 环绕通过的对勾，含明暗两版（icons/p3c.svg、icons/p3c_dark.svg）。原创图形；符合净化器的 SVG（渐变、裁剪路径、柔和投影），远小于 16 KiB 限制；不含 Java 或阿里巴巴商标。\n- 规则、快速修复、诊断与行为均无变化。WebAssembly 组件由同一份源码、同一锁定 SDK 重新构建；与 0.1.5 相比仅新增图标文件与版本元数据不同。"
 categories = ["linters"]
+icon = "icons/p3c.svg"
+icon-dark = "icons/p3c_dark.svg"
 engines.openidea = "^1.6"
 wasm = "dist/plugin.wasm"
 activation = ["on-startup-finished", "on-schedule:60", "on-event:document-changed", "on-event:file-opened", "on-event:file-saved", "on-event:editor-focused", "on-command:*"]
