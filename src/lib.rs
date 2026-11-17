@@ -66,16 +66,27 @@ impl P3c {
 
     /// 激活或定时唤醒时静默重发所有打开项目的 Java 诊断：安装/启用后无需手动扫描，
     /// 已打开的文件立即出现问题。按当前 UI 语言生成，遵循总开关；单一发布源，不与扫描重复。
+    /// 全项目 sweep 可能远超普通调用的 5s/fuel 预算，必须挂在报告任务里：宿主按 report 续期。
     fn republish_open_projects() {
         let Ok(projects) = host::projects() else { return };
+        let zh = host::locale().starts_with("zh");
+        let title = if zh { "Java Coding Guidelines：刷新诊断" } else { "Java Coding Guidelines: refresh diagnostics" };
+        let task = host::begin_task(title, true);
+        let mut done = 0u32;
         for project in projects {
             let Ok(files) = project.find_files("**/*.java", MAX_SCAN) else { continue };
             for path in files {
+                if task.is_cancelled() {
+                    return;
+                }
+                // 每文件都 report：单个大文件的 analyze 也不会让两次续期之间超预算。
+                task.report(done, None, Some(path.rsplit('/').next().unwrap_or(&path)));
                 let Ok(text) = project.read_file(&path) else { continue };
                 if text.len() > MAX_FILE {
                     continue;
                 }
                 let _ = host::publish_diagnostics(&path, &rules::analyze(&text));
+                done += 1;
             }
         }
     }
@@ -146,6 +157,10 @@ impl Plugin for P3c {
 
 impl Providers for P3c {
     fn code_actions(&mut self, doc: &Document, selection: Range) -> Vec<CodeAction> {
+        // 与 report 同上限：超大文件的 analyze 会吃满单次调用预算，快速修复不值得崩掉插件。
+        if doc.text.len() > MAX_FILE {
+            return Vec::new();
+        }
         fixes::actions(&rules::Ctx::new(&doc.text), &doc.path, selection)
     }
 }
@@ -282,7 +297,41 @@ mod tests {
         P3c.activate(&mock.context("alivop.p3c")).unwrap();
         assert_eq!(mock.diagnostics()["/project/src/A.java"].len(), 1);
         assert!(mock.diagnostics().get("/project/src/B.java").is_none_or(Vec::is_empty));
-        assert!(mock.tasks().is_empty(), "activation must not spawn a scan task");
+        assert!(mock.notifications().is_empty(), "activation must not run the scan command");
+    }
+
+    #[test]
+    fn activation_republishes_inside_a_reporting_task() {
+        let mock = MockHost::install().with_capabilities(&["project.read", "events"]);
+        for i in 0..60 {
+            mock.add_file(&format!("src/m{i}/S{i}.java"), "class S { long n = 2l; }");
+        }
+        P3c.activate(&mock.context("alivop.p3c")).unwrap();
+        let tasks = mock.tasks();
+        assert_eq!(tasks.len(), 1, "the whole-project republish must run in a task: only a reporting task gets the extended budget");
+        assert!(tasks[0].ended, "the republish task must end with the call");
+        assert!(
+            tasks[0].reports.len() >= 3,
+            "periodic reports renew the background budget: {:?}",
+            tasks[0].reports
+        );
+        assert_eq!(mock.diagnostics().len(), 60);
+        assert!(mock.notifications().is_empty(), "republish stays silent");
+    }
+
+    #[test]
+    fn code_actions_skip_oversized_documents() {
+        let _mock = MockHost::install().with_capabilities(&["project.read"]);
+        let mut text = String::from("class Big { long n = 2l; }\n");
+        while text.len() <= MAX_FILE {
+            text.push_str("// padding padding padding padding padding\n");
+        }
+        let doc = Document { path: "/project/Big.java".into(), language: "java".into(), version: 1, text };
+        let selection = Range {
+            start: openidea_plugin::Position { line: 0, character: 0 },
+            end: openidea_plugin::Position { line: 0, character: 40 },
+        };
+        assert!(P3c.code_actions(&doc, selection).is_empty(), "oversized documents must not run analyze in a provider call");
     }
 
     #[test]

@@ -1,10 +1,10 @@
 id = "alivop.p3c"
 name = "Java Coding Guidelines"
-version = "0.1.6"
+version = "0.1.7"
 description = "Checks Java files against the Alibaba Java Development Manual (P3C) while you type, with quick fixes and a project-wide scan; diagnostics appear automatically once installed or enabled. Pure WebAssembly (no PMD/JDK).\nSettings: Settings → Plugins → Java Coding Guidelines (master switch + per-group switches).\nScan: Tools → Java Coding Guidelines: Scan Project.\n中文：边写边按《阿里巴巴 Java 开发手册》（P3C）检查 Java 文件，提供快速修复与全项目扫描；安装或启用后自动出诊断。纯 WebAssembly（无需 PMD/JDK）。\n设置路径：设置 → 插件 → Java Coding Guidelines（总开关 + 按组开关）。\n扫描路径：工具 → Java Coding Guidelines: Scan Project。"
 authors = ["Alivop"]
 license = "Apache-2.0"
-change-notes = "0.1.6 — add a plugin icon (marketplace + Settings).\n- New icon: code braces { } around a passing check on an indigo-to-blue-to-cyan tile, with light and dark variants (icons/p3c.svg, icons/p3c_dark.svg). Original artwork; sanitiser-safe SVG (gradients, clip path, soft drop shadow), well under the 16 KiB limit; no Java or Alibaba trademarks.\n- No rule, quick-fix, diagnostic or behavior changes. The WebAssembly component is rebuilt from the same source with the same pinned SDK; only the icon files and version metadata differ from 0.1.5.\n\n中文：0.1.6 新增插件图标（市场 + 设置）。\n- 新图标：靛蓝→蓝→青色底上，代码括号 { } 环绕通过的对勾，含明暗两版（icons/p3c.svg、icons/p3c_dark.svg）。原创图形；符合净化器的 SVG（渐变、裁剪路径、柔和投影），远小于 16 KiB 限制；不含 Java 或阿里巴巴商标。\n- 规则、快速修复、诊断与行为均无变化。WebAssembly 组件由同一份源码、同一锁定 SDK 重新构建；与 0.1.5 相比仅新增图标文件与版本元数据不同。"
+change-notes = "0.1.7 — fix the host crash dialog (\"timed out after 5s\") on large projects.\n- The automatic whole-project republish (install/enable/cold start and the idle wakeup) now runs inside a reporting background task: the host extends the call's wall-clock and CPU-fuel budget on every progress report, so sweeping thousands of Java files no longer trips the 5 s per-call limit and crashes the plugin. Cancellation is respected.\n- Quick fixes now skip documents above the same 2 MiB cap the diagnostics already use, so one huge file cannot exhaust a provider call's budget either.\n- No rule, diagnostic-message or scan-behavior changes; two regression tests added (reporting-task seam + size cap).\n\n中文：0.1.7 — 修复大项目下的宿主崩溃框（\"timed out after 5s\"）。\n- 自动全项目重发（安装/启用/冷启动与空闲唤醒）改为挂在带汇报的后台任务里：宿主按每次进度汇报续期墙钟与 CPU fuel 预算，扫数千个 Java 文件不再撞 5 秒单次调用上限而崩溃；支持取消。\n- 快速修复跳过超过 2 MiB 的文档（与诊断同一上限），单个超大文件不再耗尽 provider 调用预算。\n- 规则、诊断文案与扫描行为均无变化；新增两条回归测试（报告任务缝 + 大小上限）。"
 categories = ["linters"]
 icon = "icons/p3c.svg"
 icon-dark = "icons/p3c_dark.svg"
